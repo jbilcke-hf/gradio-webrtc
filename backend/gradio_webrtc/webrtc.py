@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaRelay
-from aiortc import VideoStreamTrack
+from aiortc import VideoStreamTrack, AudioStreamTrack
 from aiortc.mediastreams import MediaStreamError
 from aiortc.contrib.media import VideoFrame  # type: ignore
 from gradio_client import handle_file
@@ -27,69 +27,96 @@ if TYPE_CHECKING:
 if wasm_utils.IS_WASM:
     raise ValueError("Not supported in gradio-lite!")
 
-
-class VideoCallback(VideoStreamTrack):
+class FlexibleMediaCallback(VideoStreamTrack, AudioStreamTrack):
     """
-    This works for streaming input and output
+    This works for streaming input and output with flexible combinations of video and audio
     """
-
-    kind = "video"
 
     def __init__(
         self,
-        track,
+        video_track,
+        audio_track,
         event_handler: Callable,
     ) -> None:
-        super().__init__()  # don't forget this!
-        self.track = track
+        super().__init__()
+        self.video_track = video_track
+        self.audio_track = audio_track
         self.event_handler = event_handler
         self.latest_args: str | list[Any] = "not_set"
 
     def add_frame_to_payload(
-        self, args: list[Any], frame: np.ndarray | None
+        self, args: list[Any], video_frame: np.ndarray | None, audio_frame: np.ndarray | None
     ) -> list[Any]:
         new_args = []
         for val in args:
             if isinstance(val, str) and val == "__webrtc_value__":
-                new_args.append(frame)
+                if video_frame is not None and audio_frame is not None:
+                    new_args.append((video_frame, audio_frame))
+                elif video_frame is not None:
+                    new_args.append(video_frame)
+                elif audio_frame is not None:
+                    new_args.append(audio_frame)
+                else:
+                    new_args.append(None)
             else:
                 new_args.append(val)
         return new_args
 
-    def array_to_frame(self, array: np.ndarray) -> VideoFrame:
+    def array_to_video_frame(self, array: np.ndarray) -> VideoFrame:
         return VideoFrame.from_ndarray(array, format="bgr24")
+
+    def array_to_audio_frame(self, array: np.ndarray) -> AudioFrame:
+        return AudioFrame.from_ndarray(array)
 
     async def recv(self):
         try:
-            try:
-                frame = await self.track.recv()
-            except MediaStreamError:
-                return
-            frame_array = frame.to_ndarray(format="bgr24")
+            video_frame = await self.video_track.recv() if self.video_track else None
+            audio_frame = await self.audio_track.recv() if self.audio_track else None
+            
+            video_array = video_frame.to_ndarray(format="bgr24") if video_frame else None
+            audio_array = audio_frame.to_ndarray() if audio_frame else None
 
             if self.latest_args == "not_set":
-                return frame
+                return video_frame, audio_frame
 
-            args = self.add_frame_to_payload(cast(list, self.latest_args), frame_array)
+            args = self.add_frame_to_payload(cast(list, self.latest_args), video_array, audio_array)
 
-            array = self.event_handler(*args)
+            output = self.event_handler(*args)
 
-            new_frame = self.array_to_frame(array)
-            if frame:
-                new_frame.pts = frame.pts
-                new_frame.time_base = frame.time_base
+            if isinstance(output, tuple) and len(output) == 2:
+                video_output, audio_output = output
+            elif isinstance(output, np.ndarray):
+                if video_frame:
+                    video_output, audio_output = output, None
+                else:
+                    video_output, audio_output = None, output
             else:
-                pts, time_base = await self.next_timestamp()
-                new_frame.pts = pts
-                new_frame.time_base = time_base
+                video_output, audio_output = None, None
 
-            return new_frame
+            new_video_frame = self.array_to_video_frame(video_output) if video_output is not None else None
+            new_audio_frame = self.array_to_audio_frame(audio_output) if audio_output is not None else None
+
+            if video_frame and new_video_frame:
+                new_video_frame.pts = video_frame.pts
+                new_video_frame.time_base = video_frame.time_base
+            elif new_video_frame:
+                pts, time_base = await self.next_timestamp()
+                new_video_frame.pts = pts
+                new_video_frame.time_base = time_base
+
+            if audio_frame and new_audio_frame:
+                new_audio_frame.pts = audio_frame.pts
+                new_audio_frame.time_base = audio_frame.time_base
+            elif new_audio_frame:
+                pts, time_base = await self.next_timestamp()
+                new_audio_frame.pts = pts
+                new_audio_frame.time_base = time_base
+
+            return new_video_frame or new_audio_frame
         except Exception as e:
             print(e)
             import traceback
-
             traceback.print_exc()
-
 
 class WebRTC(Component):
     """
@@ -104,7 +131,7 @@ class WebRTC(Component):
 
     pcs: set[RTCPeerConnection] = set([])
     relay = MediaRelay()
-    connections: dict[str, VideoCallback] = {}
+    connections: dict[str, FlexibleMediaCallback] = {}
 
     EVENTS = ["tick"]
 
@@ -285,10 +312,20 @@ class WebRTC(Component):
                 if self.time_limit is not None:
                     asyncio.create_task(self.wait_for_time_limit(pc, self.time_limit))
 
+        video_track = None
+        audio_track = None
+
         @pc.on("track")
         def on_track(track):
-            cb = VideoCallback(
-                self.relay.subscribe(track),
+            nonlocal video_track, audio_track
+            if track.kind == "video":
+                video_track = self.relay.subscribe(track)
+            elif track.kind == "audio":
+                audio_track = self.relay.subscribe(track)
+
+            cb = FlexibleMediaCallback(
+                video_track,
+                audio_track,
                 event_handler=cast(Callable, self.event_handler),
             )
             self.connections[body["webrtc_id"]] = cb
@@ -299,7 +336,7 @@ class WebRTC(Component):
 
         # send answer
         answer = await pc.createAnswer()
-        await pc.setLocalDescription(answer)  # type: ignore
+        await pc.setLocalDescription(answer)
 
         return {
             "sdp": pc.localDescription.sdp,
