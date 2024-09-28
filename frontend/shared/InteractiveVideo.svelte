@@ -10,7 +10,8 @@
 	export let value: string = null;
 	export let label: string | undefined = undefined;
 	export let show_label = true;
-	export let include_audio: boolean;
+	export let include_video: boolean = true;
+	export let include_audio: boolean = false;
 	export let i18n: I18nFormatter;
 	export let active_source: "webcam" | "upload" = "webcam";
 	export let handle_reset_value: () => void = () => {};
@@ -41,10 +42,11 @@
 	$: console.log("interactive value", value);
 </script>
 
-<BlockLabel {show_label} Icon={Video} label={label || "Video"} />
+<BlockLabel {show_label} Icon={Video} label={label || (include_video && include_audio ? "Video and Audio" : include_video ? "Video" : "Audio")} />
 <div data-testid="video" class="video-container">
 	<Webcam
 		{rtc_configuration}
+		{include_video}
 		{include_audio}
 		{time_limit}
 		on:error

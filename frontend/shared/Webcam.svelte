@@ -12,11 +12,10 @@
 	import { fade } from "svelte/transition";
 	import {
 		get_devices,
-		get_video_stream,
+		get_media_stream,
 		set_available_devices
 	} from "./stream_utils";
-
-    import { start, stop } from "./webrtc_utils";
+  import { start, stop } from "./webrtc_utils";
 
 	let video_source: HTMLVideoElement;
 	let available_video_devices: MediaDeviceInfo[] = [];
@@ -46,7 +45,8 @@
 		offer: (body: any) => Promise<any>;
 	};
 
-	export let include_audio: boolean;
+	export let include_video: boolean = true;
+  export let include_audio: boolean = true;
 	export let i18n: I18nFormatter;
 
 	const dispatch = createEventDispatcher<{
@@ -77,36 +77,36 @@
 
 	async function access_webcam(): Promise<void> {
 		try {
-			get_video_stream(include_audio, video_source)
-				.then(async (local_stream) => {
-					webcam_accessed = true;
-					available_video_devices = await get_devices();
-					stream = local_stream;
-				})
-				.then(() => set_available_devices(available_video_devices))
-				.then((devices) => {
-					available_video_devices = devices;
+      get_media_stream(include_video, include_audio, video_source)
+      .then(async (local_stream) => {
+        webcam_accessed = true;
+        available_video_devices = await get_devices();
+        stream = local_stream;
+      })
+      .then(() => set_available_devices(available_video_devices))
+      .then((devices) => {
+        available_video_devices = devices;
 
-					const used_devices = stream
-						.getTracks()
-						.map((track) => track.getSettings()?.deviceId)[0];
+        const used_devices = stream
+          .getTracks()
+          .map((track) => track.getSettings()?.deviceId)[0];
 
-					selected_device = used_devices
-						? devices.find((device) => device.deviceId === used_devices) ||
-							available_video_devices[0]
-						: available_video_devices[0];
-				});
+        selected_device = used_devices
+          ? devices.find((device) => device.deviceId === used_devices) ||
+            available_video_devices[0]
+          : available_video_devices[0];
+      });
 
-			if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-				dispatch("error", i18n("image.no_webcam_support"));
-			}
-		} catch (err) {
-			if (err instanceof DOMException && err.name == "NotAllowedError") {
-				dispatch("error", i18n("image.allow_webcam_access"));
-			} else {
-				throw err;
-			}
-		}
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        dispatch("error", i18n("media.no_media_support"));
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name == "NotAllowedError") {
+        dispatch("error", i18n("media.allow_media_access"));
+      } else {
+        throw err;
+      }
+    }
 	}
 
 	let recording = false;
@@ -199,13 +199,17 @@
 	<StreamingBar time_limit={_time_limit} />
 	<!-- svelte-ignore a11y-media-has-caption -->
 	<!-- need to suppress for video streaming https://github.com/sveltejs/svelte/issues/5967 -->
-	<video
-		bind:this={video_source}
-		class:hide={!webcam_accessed}
-        class:flip={(stream_state != "open")}
-        autoplay={true}
-		playsinline={true}
-	/>
+	{#if include_video}
+    <video
+      bind:this={video_source}
+      class:hide={!webcam_accessed}
+      class:flip={(stream_state != "open")}
+      autoplay={true}
+      playsinline={true}
+    />
+  {:else if include_audio}
+    <audio bind:this={video_source} autoplay />
+  {/if}
 	<!-- svelte-ignore a11y-missing-attribute -->
 	{#if !webcam_accessed}
 		<div

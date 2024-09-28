@@ -28,31 +28,42 @@ export function createPeerConnection(pc, node) {
 	pc.addEventListener("track", (evt) => {
 		console.log("track event listener");
 		if (evt.track.kind == "video") {
-			console.log("streams", evt.streams);
-			node.srcObject = evt.streams[0];
-			console.log("node.srcOject", node.srcObject);
+				console.log("video track received");
+				node.srcObject = evt.streams[0];
+		} else if (evt.track.kind == "audio") {
+				console.log("audio track received");
+				// If there's no video, set the audio stream as the source
+				if (!node.srcObject) {
+						node.srcObject = evt.streams[0];
+				} else {
+						// If there's already a video stream, add the audio track to it
+						const existingStream = node.srcObject as MediaStream;
+						existingStream.addTrack(evt.track);
+				}
 		}
-	});
+		console.log("node.srcObject", node.srcObject);
+});
+
 
 	return pc;
 }
 
 export async function start(stream, pc, node, server_fn, webrtc_id) {
-	pc = createPeerConnection(pc, node);
-	if (stream) {
-		stream.getTracks().forEach((track) => {
-			track.applyConstraints({ frameRate: { max: 30 } });
+		pc = createPeerConnection(pc, node);
+		if (stream) {
+				stream.getTracks().forEach((track) => {
+						track.applyConstraints({ frameRate: { max: 30 } });
+						console.log("Track stream callback", track);
+						pc.addTrack(track, stream);
+				});
+		} else {
+				console.log("Creating transceivers!");
+				pc.addTransceiver("video", { direction: "recvonly" });
+				pc.addTransceiver("audio", { direction: "recvonly" });
+		}
 
-			console.log("Track stream callback", track);
-			pc.addTrack(track, stream);
-		});
-	} else {
-		console.log("Creating transceiver!");
-		pc.addTransceiver("video", { direction: "recvonly" });
-	}
-
-	await negotiate(pc, server_fn, webrtc_id);
-	return pc;
+		await negotiate(pc, server_fn, webrtc_id);
+		return pc;
 }
 
 function make_offer(server_fn: any, body): Promise<object> {
