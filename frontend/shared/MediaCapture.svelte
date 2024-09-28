@@ -43,7 +43,7 @@
 </script>
 
 <BlockLabel {show_label} Icon={Video} label={label || (include_video && include_audio ? "Video and Audio" : include_video ? "Video" : "Audio")} />
-<div data-testid="video" class="video-container">
+<div data-testid="media" class="media-container">
 	<Webcam
 		{rtc_configuration}
 		{include_video}
@@ -79,7 +79,7 @@
 		width: 100%;
 	}
 
-	.video-container {
+	.media-container {
 		display: flex;
 		height: 100%;
 		flex-direction: column;

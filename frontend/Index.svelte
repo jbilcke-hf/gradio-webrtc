@@ -2,7 +2,7 @@
 
 <script lang="ts">
 	import { Block, UploadText } from "@gradio/atoms";
-	import Video from "./shared/InteractiveVideo.svelte";
+	import MediaCapture from "./shared/MediaCapture.svelte";
 	import { StatusTracker } from "@gradio/statustracker";
 	import type { LoadingStatus } from "@gradio/statustracker";
 
@@ -71,7 +71,7 @@
 		on:clear_status={() => gradio.dispatch("clear_status", loading_status)}
 	/>
 
-	<Video
+	<MediaCapture
 		bind:value={value}
 		{label}
 		{show_label}
@@ -95,6 +95,6 @@
 		stream_handler={(...args) => gradio.client.stream(...args)}
 	>
 		<UploadText i18n={gradio.i18n} type="video" />
-	</Video>
+	</MediaCapture>
 </Block>
 <!-- {/if} -->
